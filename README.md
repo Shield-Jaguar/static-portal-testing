@@ -1,1 +1,1 @@
-# static-portal-testing
+This repository demonstrates how APIMatic's [Filtering API by Roles](https://portal-api-docs.apimatic.io/#/http/generating-api-portal/filtering-api-by-roles) can be used to automate the generation of Role based Developer Portals via CI/CD.
