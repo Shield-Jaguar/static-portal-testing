@@ -13,14 +13,14 @@ on:
           - user
 
 jobs:
-  build-and-package:
+  build-and-upload:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v1
 
-      - name: Filter input files
+      - name: Prepare build input (include only selected portal)
         run: |
           selected="${{ github.event.inputs.portalName }}-APIMATIC-BUILD.json"
           find . -name '*-APIMATIC-BUILD.json' ! -name "$selected" -delete
@@ -34,15 +34,8 @@ jobs:
             -F 'file=@input.zip' \
             -o output.zip
 
-      - name: Unzip generated portal
-        run: unzip -qq output.zip -d static-portal
-
-      - name: Re-zip the generated portal for artifact
-        run: |
-          zip -qq -r static-portal.zip static-portal
-
-      - name: Upload ZIP artifact
+      - name: Upload generated portal ZIP as artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ github.event.inputs.portalName }}-portal
-          path: static-portal.zip
+          path: output.zip
