@@ -1,0 +1,48 @@
+name: Build Static Portal
+
+on:
+  workflow_dispatch:
+    inputs:
+      portalName:
+        description: 'Select which portal to build'
+        required: true
+        default: 'admin'
+        type: choice
+        options:
+          - admin
+          - user
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v1
+
+      - name: Filter input files
+        run: |
+          selected="${{ github.event.inputs.portalName }}-APIMATIC-BUILD.json"
+          find . -name '*-APIMATIC-BUILD.json' ! -name "$selected" -delete
+          zip -qq -r input.zip .
+
+      - name: Call APIMatic build endpoint
+        run: |
+          curl -X POST \
+            --url 'https://api.apimatic.io/portal' \
+            -H 'Authorization:X-Auth-Key ${{ secrets.API_KEY }}' \
+            -F 'file=@input.zip' \
+            -o output.zip
+
+      - name: Unzip generated portal
+        run: unzip -qq output.zip -d static-portal
+
+      - name: Re-zip the generated portal for artifact
+        run: |
+          zip -qq -r static-portal.zip static-portal
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.portalName }}-portal
+          path: static-portal.zip
