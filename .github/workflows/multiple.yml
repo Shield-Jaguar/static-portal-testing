@@ -1,4 +1,4 @@
-name: Build Static Portal
+name: Build Multiple Static Portal
 
 on:
   workflow_dispatch:
