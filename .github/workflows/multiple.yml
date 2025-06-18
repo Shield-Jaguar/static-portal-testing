@@ -4,10 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       portalName:
-        description: 'Optional: Portal to build (e.g. admin, user)'
+        description: 'Optional: Select a specific portal to build'
         required: false
         default: ''
-        type: string
+        type: choice
+        options:
+          - ''
+          - admin
+          - user
 
 jobs:
   build-portal:
@@ -17,72 +21,69 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v1
 
-      - name: Detect which portals to build
+      - name: Determine build files
         id: detect
         run: |
           input="${{ github.event.inputs.portalName }}"
-          echo "Input portal: $input"
+          echo "Selected input: '$input'"
 
           build_files=()
 
           if [[ -n "$input" ]]; then
-            # Specific input case
             candidate="${input}-APIMATIC-BUILD.json"
             if [[ -f "$candidate" ]]; then
               build_files+=("$candidate")
             elif [[ -f "APIMATIC-BUILD.json" ]]; then
+              echo "⚠️ '${candidate}' not found. Using fallback 'APIMATIC-BUILD.json'"
               build_files+=("APIMATIC-BUILD.json")
             else
-              echo "❌ No matching file found for input: $input"
+              echo "❌ No matching input or fallback file found."
               exit 1
             fi
           else
-            # No input case — find all build files
             mapfile -t build_files < <(find . -maxdepth 1 -name '*-APIMATIC-BUILD.json' | sort)
             if [[ ${#build_files[@]} -eq 0 && -f "APIMATIC-BUILD.json" ]]; then
               build_files=("APIMATIC-BUILD.json")
             elif [[ ${#build_files[@]} -eq 0 ]]; then
-              echo "❌ No build files found."
+              echo "❌ No build input files found."
               exit 1
             fi
           fi
 
-          # Save the list of build files for the next step
-          echo "files_to_build<<EOF" >> $GITHUB_OUTPUT
-          printf "%s\n" "${build_files[@]}" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "Found ${#build_files[@]} build files:"
+          printf "%s\n" "${build_files[@]}"
 
-      - name: Loop over build files and build/upload artifacts
+          # Write to a file for next step
+          printf "%s\n" "${build_files[@]}" > build_list.txt
+
+      - name: Build and upload artifacts
         run: |
-          echo "${{ steps.detect.outputs.files_to_build }}" | while read file; do
+          while read file; do
             [ -z "$file" ] && continue
-            echo "📦 Building for: $file"
+            echo "🔧 Building from: $file"
 
-            temp_dir=$(mktemp -d)
-            cp "$file" "$temp_dir/"
+            workdir=$(mktemp -d)
+            cp "$file" "$workdir/"
+            (cd "$workdir" && zip -qq -r input.zip .)
 
-            pushd "$temp_dir" > /dev/null
-            zip -qq -r input.zip .
-            popd > /dev/null
-
-            # Call APIMatic
             curl -X POST \
               --url 'https://api.apimatic.io/portal' \
               -H 'Authorization:X-Auth-Key ${{ secrets.API_KEY }}' \
-              -F "file=@${temp_dir}/input.zip" \
-              -o "${temp_dir}/output.zip"
+              -F "file=@$workdir/input.zip" \
+              -o "$workdir/output.zip"
 
-            # Extract base name (e.g. admin from admin-APIMATIC-BUILD.json)
-            base=$(basename "$file")
-            name="${base%%-*}"
-            [ "$base" == "APIMATIC-BUILD.json" ] && name="default"
+            name=$(basename "$file" -APIMATIC-BUILD.json)
+            [ "$file" == "APIMATIC-BUILD.json" ] && name="default"
 
-            # Upload artifact
-            echo "Uploading artifact: ${name}-portal"
-            gh run upload-artifact "${name}-portal" "${temp_dir}/output.zip"
+            mv "$workdir/output.zip" "$name-portal.zip"
 
-            rm -rf "$temp_dir"
-          done
+            echo "✅ Built and saved: $name-portal.zip"
 
-        env:
-          GH_TOKEN: ${{ github.token }}
+            rm -rf "$workdir"
+          done < build_list.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: portals
+          path: '*-portal.zip'
