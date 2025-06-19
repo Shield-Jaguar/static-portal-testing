@@ -21,10 +21,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v1
 
-      - name: Prepare build input (include only selected portal)
+      - name: Prepare build input (with fallback logic)
         run: |
-          selected="${{ github.event.inputs.portalName }}-APIMATIC-BUILD.json"
-          find . -name '*-APIMATIC-BUILD.json' ! -name "$selected" -delete
+          set -e
+
+          input="${{ github.event.inputs.portalName }}"
+          echo "Selected input: '$input'"
+
+          selected=""
+
+          if [[ -n "$input" ]]; then
+            selected="${input}-APIMATIC-BUILD.json"
+            if [[ ! -f "$selected" ]]; then
+              echo "❌ File not found: $selected"
+              exit 1
+            fi
+          elif [[ -f "APIMATIC-BUILD.json" ]]; then
+            selected="APIMATIC-BUILD.json"
+          else
+            count=$(find . -maxdepth 1 -name '*-APIMATIC-BUILD.json' | wc -l)
+            if [[ "$count" -eq 1 ]]; then
+              selected=$(find . -maxdepth 1 -name '*-APIMATIC-BUILD.json')
+            else
+              echo "❌ No input provided, and ambiguous number of build files found ($count)."
+              exit 1
+            fi
+          fi
+
+          echo "✅ Using build file: $selected"
+
+          # Delete all other build files
+          find . -name '*-APIMATIC-BUILD.json' ! -name "$(basename "$selected")" -delete
+
+          # Zip input
           zip -qq -r input.zip .
 
       - name: Call APIMatic build endpoint
