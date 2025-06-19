@@ -9,6 +9,7 @@ on:
         default: 'admin'
         type: choice
         options:
+          - ''
           - admin
           - user
 
