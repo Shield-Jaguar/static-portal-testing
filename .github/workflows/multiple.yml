@@ -1,4 +1,4 @@
-name: Build Multiple Static Portal
+name: Build Static Portal
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ on:
           - user
 
 jobs:
-  build-portal:
+  build-and-upload:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,65 +24,67 @@ jobs:
       - name: Determine build files
         id: detect
         run: |
+          set -e
           input="${{ github.event.inputs.portalName }}"
           echo "Selected input: '$input'"
 
-          build_files=()
+          files=()
 
           if [[ -n "$input" ]]; then
             candidate="${input}-APIMATIC-BUILD.json"
             if [[ -f "$candidate" ]]; then
-              build_files+=("$candidate")
-            elif [[ -f "APIMATIC-BUILD.json" ]]; then
-              echo "⚠️ '${candidate}' not found. Using fallback 'APIMATIC-BUILD.json'"
-              build_files+=("APIMATIC-BUILD.json")
+              files+=("$candidate")
             else
-              echo "❌ No matching input or fallback file found."
+              echo "❌ File not found: $candidate"
               exit 1
             fi
+          elif [[ -f "APIMATIC-BUILD.json" ]]; then
+            files+=("APIMATIC-BUILD.json")
           else
-            mapfile -t build_files < <(find . -maxdepth 1 -name '*-APIMATIC-BUILD.json' | sort)
-            if [[ ${#build_files[@]} -eq 0 && -f "APIMATIC-BUILD.json" ]]; then
-              build_files=("APIMATIC-BUILD.json")
-            elif [[ ${#build_files[@]} -eq 0 ]]; then
-              echo "❌ No build input files found."
+            mapfile -t files < <(find . -maxdepth 1 -name '*-APIMATIC-BUILD.json' | sort)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              echo "❌ No build files found."
               exit 1
             fi
           fi
 
-          echo "Found ${#build_files[@]} build files:"
-          printf "%s\n" "${build_files[@]}"
+          echo "Detected build files:"
+          printf "%s\n" "${files[@]}"
+          printf "%s\n" "${files[@]}" > build-list.txt
 
-          # Write to a file for next step
-          printf "%s\n" "${build_files[@]}" > build_list.txt
-
-      - name: Build and upload artifacts
+      - name: Build and upload portals
         run: |
-          while read file; do
-            [ -z "$file" ] && continue
-            echo "🔧 Building from: $file"
+          while read selected; do
+            [ -z "$selected" ] && continue
+            echo "🔧 Building portal for: $selected"
 
+            # Create clean working directory
             workdir=$(mktemp -d)
-            cp "$file" "$workdir/"
+            cp "$selected" "$workdir/"
+            cp -r $(find . -maxdepth 1 -type f ! -name '*-APIMATIC-BUILD.json') "$workdir/" 2>/dev/null || true
+
+            # Create input.zip for APIMatic
             (cd "$workdir" && zip -qq -r input.zip .)
 
+            # Call APIMatic build API
             curl -X POST \
               --url 'https://api.apimatic.io/portal' \
               -H 'Authorization:X-Auth-Key ${{ secrets.API_KEY }}' \
               -F "file=@$workdir/input.zip" \
               -o "$workdir/output.zip"
 
-            name=$(basename "$file" -APIMATIC-BUILD.json)
-            [ "$file" == "APIMATIC-BUILD.json" ] && name="default"
+            # Rename output.zip for clarity
+            name=$(basename "$selected" -APIMATIC-BUILD.json)
+            [[ "$selected" == "APIMATIC-BUILD.json" ]] && name="default"
 
-            mv "$workdir/output.zip" "$name-portal.zip"
-
-            echo "✅ Built and saved: $name-portal.zip"
+            final_name="${name}-portal.zip"
+            mv "$workdir/output.zip" "$final_name"
+            echo "✅ Built portal: $final_name"
 
             rm -rf "$workdir"
-          done < build_list.txt
+          done < build-list.txt
 
-      - name: Upload artifacts
+      - name: Upload generated portal ZIPs
         uses: actions/upload-artifact@v4
         with:
           name: portals
