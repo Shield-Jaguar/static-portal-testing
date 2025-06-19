@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       portalName:
-        description: 'Select which portal to build'
-        required: true
-        default: 'admin'
+        description: 'Optional: Select a specific portal to build'
+        required: false
+        default: ''
         type: choice
         options:
+          - ''
           - admin
           - user
 
